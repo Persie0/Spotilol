@@ -14,7 +14,7 @@ object MainLoop {
                         AndBridge.wakeOff();
                     }
 
-                    if(typeof npBtn=='undefined') {
+                    if(typeof npBtn=='undefined' || !npBtn.isConnected) {
                         var lyBtn = document.querySelector('button[data-testid=lyrics-button]:not(.fuckd)');
                         var queueBtn = document.querySelector('button[data-testid=control-button-queue]:not(.fuckd)');
                         var anchorBtn = lyBtn || queueBtn;
