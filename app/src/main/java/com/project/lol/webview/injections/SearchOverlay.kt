@@ -27,6 +27,15 @@ object SearchOverlay {
                 window.splSearchInit = true;
 
                 var panel = null, pInput = null, debTimer = null, seq = 0;
+                var activeRequest = null, searchCache = new Map();
+                function cancelPending(){
+                    if(activeRequest){ activeRequest.abort(); activeRequest = null; }
+                }
+                function controllerForSearch(){
+                    cancelPending();
+                    activeRequest = new AbortController();
+                    return activeRequest;
+                }
                 var lastQ = '', anchoredBtn = null;
                 var showGuardUntil = 0;
                 var resizeTimer = null;
@@ -443,9 +452,9 @@ object SearchOverlay {
                         list.appendChild(em);
                         return;
                     }
-                    for(var i=0;i<items.length;i++){
-                        list.appendChild(rowFor(items[i]));
-                    }
+                    var batch = document.createDocumentFragment();
+                    for(var i=0;i<Math.min(items.length,30);i++) batch.appendChild(rowFor(items[i]));
+                    list.appendChild(batch);
                 }
 
                 function renderRecent(items){
@@ -463,17 +472,19 @@ object SearchOverlay {
                     t.className = 'spl-stitle';
                     t.textContent = 'Recent searches';
                     list.appendChild(t);
-                    for(var i=0;i<items.length;i++){
-                        list.appendChild(rowFor(items[i]));
-                    }
+                    var batch = document.createDocumentFragment();
+                    for(var i=0;i<Math.min(items.length,24);i++) batch.appendChild(rowFor(items[i]));
+                    list.appendChild(batch);
                 }
 
                 function doRecent(){
                     var my = ++seq;
                     if(!window.spotAuthToken){ return; }
+                    var request = controllerForSearch();
                     window.__splOwnCall=true;
                     fetch('https://api-partner.spotify.com/pathfinder/v2/query', {
                         method:'POST',
+                        signal:request.signal,
                         headers:{
                             'Authorization': window.spotAuthToken,
                             'Client-Token': window.spotCliToken || '',
@@ -499,9 +510,16 @@ object SearchOverlay {
                 function doSearch(q){
                     var my = ++seq;
                     if(!window.spotAuthToken){ return; }
+                    var cached = searchCache.get(q);
+                    if(cached && Date.now()-cached.time<60000){
+                        renderResults(cached.items);
+                        return;
+                    }
+                    var request = controllerForSearch();
                     window.__splOwnCall=true;
                     fetch('https://api-partner.spotify.com/pathfinder/v2/query', {
                         method:'POST',
+                        signal:request.signal,
                         headers:{
                             'Authorization': window.spotAuthToken,
                             'Client-Token': window.spotCliToken || '',
@@ -519,12 +537,17 @@ object SearchOverlay {
                         for(var i=0;i<items.length;i++){
                             if(items[i] && items[i].item) flat.push(items[i].item);
                         }
+                        searchCache.set(q,{items:flat,time:Date.now()});
+                        if(searchCache.size>20) searchCache.delete(searchCache.keys().next().value);
                         renderResults(flat);
-                    }).catch(function(){});
+                    }).catch(function(e){ if(e.name!=='AbortError' && my===seq) renderResults([]); });
                     window.__splOwnCall=false;
                 }
 
                 function onInput(){
+                    // Invalidate in-flight results immediately, not after debounce.
+                    ++seq;
+                    cancelPending();
                     var v = pInput.value.trim();
                     if(!v){
                         lastQ = '';
@@ -537,7 +560,7 @@ object SearchOverlay {
                     if(v === lastQ) return;
                     lastQ = v;
                     clearTimeout(debTimer);
-                    debTimer = setTimeout(function(){ doSearch(v); }, 220);
+                    debTimer = setTimeout(function(){ doSearch(v); }, 160);
                 }
 
                 function buildPanel(){
