@@ -105,6 +105,7 @@ import com.project.lol.service.MediaNotificationService
 import com.project.lol.timer.AppQuit
 import com.project.lol.timer.SleepTimerAction
 import com.project.lol.timer.SleepTimerManager
+import com.project.lol.ui.components.NativeBottomTabs
 import com.project.lol.ui.components.SettingsDialog
 import com.project.lol.ui.components.SleepTimerDialog
 import com.project.lol.ui.theme.SpotifyTheme
@@ -146,6 +147,37 @@ class MainActivity : ComponentActivity(), WebViewHost.UiHost {
         get() = WebViewHost.webView
 
     private val webViewGeneration = mutableIntStateOf(0)
+    private val nativeBottomNavState = mutableStateOf(false)
+    private val nativeTabIndex = mutableIntStateOf(0)
+    private val navigationPrefsListener = SharedPreferences.OnSharedPreferenceChangeListener { updated, key ->
+        if (key == "NativeBottomNav") {
+            runOnUiThread {
+                nativeBottomNavState.value = updated.getBoolean("NativeBottomNav", false)
+            }
+        }
+    }
+
+    private fun navigateNativeTab(tab: Int) {
+        nativeTabIndex.intValue = tab
+        val script = when (tab) {
+            0 -> """(function(){
+                    var home=document.querySelector('#global-nav-bar button[data-testid=home-button]') ||
+                        document.querySelector('a[href="/"]');
+                    if(home) home.click(); else window.location.assign('https://open.spotify.com/');
+                })();"""
+            1 -> """(function(){
+                    if(typeof window.splSearchOpen==='function') window.splSearchOpen();
+                    else { var btn=document.querySelector('#global-nav-bar button[data-testid=search-icon]'); if(btn) btn.click(); }
+                })();"""
+            2 -> """(function(){
+                    var library=document.querySelector('a[href="/collection/tracks"]');
+                    if(library) library.click();
+                    else window.location.assign('https://open.spotify.com/collection/tracks');
+                })();"""
+            else -> return
+        }
+        webView?.evaluateJavascript(script, null)
+    }
     private var serviceStarted = false
     @Volatile private var pipCoverBitmap: Bitmap? = null
     @Volatile private var pipPlaying = false
@@ -216,6 +248,8 @@ class MainActivity : ComponentActivity(), WebViewHost.UiHost {
         })
 
         prefs = getSharedPreferences("spotilol_prefs", MODE_PRIVATE)
+        nativeBottomNavState.value = prefs.getBoolean("NativeBottomNav", false)
+        prefs.registerOnSharedPreferenceChangeListener(navigationPrefsListener)
 
         SleepTimerManager.loadAction(this)
         sleepTimerState.value = SleepTimerManager.state()
@@ -262,6 +296,7 @@ class MainActivity : ComponentActivity(), WebViewHost.UiHost {
 
         setContent {
             val serviceEnabled = serviceEnabledState.value
+            val nativeBottomNav = nativeBottomNavState.value
             val materialYou = materialYouState.value
             val amoled = amoledState.value
             val hideTopBar = hideTopBarState.value
@@ -430,6 +465,14 @@ class MainActivity : ComponentActivity(), WebViewHost.UiHost {
                                 )
                             )
                             }
+                    },
+                    bottomBar = {
+                        if (nativeBottomNav && serviceEnabled && !pipFilling && !videoFullscreen && !wideVideoFullscreen) {
+                            NativeBottomTabs(
+                                selectedTab = nativeTabIndex.intValue,
+                                onSelect = { navigateNativeTab(it) }
+                            )
+                        }
                     }
 ) { innerPadding ->
                         Box(
@@ -1296,6 +1339,7 @@ class MainActivity : ComponentActivity(), WebViewHost.UiHost {
         })
 
         prefs = getSharedPreferences("spotilol_prefs", MODE_PRIVATE)
+        nativeBottomNavState.value = prefs.getBoolean("NativeBottomNav", false)
         serviceEnabledState.value = prefs.getBoolean("ServiceOn", true)
         materialYouState.value = prefs.getBoolean("MaterialYou", false)
         amoledState.value = prefs.getBoolean("AmoledTheme", false)
@@ -1425,6 +1469,7 @@ class MainActivity : ComponentActivity(), WebViewHost.UiHost {
 
     override fun onDestroy() {
         Logger.i(TAG, "activity destroyed, detaching from the webview")
+        prefs.unregisterOnSharedPreferenceChangeListener(navigationPrefsListener)
         pipVideoView = null
         pipVideoCallback = null
         pipVideoActive.value = false
@@ -1439,6 +1484,18 @@ class MainActivity : ComponentActivity(), WebViewHost.UiHost {
 
     override fun onProgress(progress: Int) {
         loadingProgress.intValue = progress
+    }
+
+    override fun onNavigationChanged(url: String?) {
+        if (url?.startsWith("https://open.spotify.com") != true) return
+        val path = runCatching { Uri.parse(url).path.orEmpty() }.getOrDefault("")
+        val tab = when {
+            path.startsWith("/search") -> 1
+            path.startsWith("/collection") -> 2
+            path.isBlank() || path == "/" -> 0
+            else -> return
+        }
+        if (nativeTabIndex.intValue != tab) nativeTabIndex.intValue = tab
     }
 
     override fun onShowCustomView(view: View?, callback: android.webkit.WebChromeClient.CustomViewCallback?) {

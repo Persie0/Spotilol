@@ -237,6 +237,7 @@ fun SettingsContent(
             ?.isLowRamDevice == true
     }
     var lowEndMode by remember { mutableStateOf(prefs.getBoolean("LowEndMode", lowRamDevice)) }
+    var nativeBottomNav by remember { mutableStateOf(prefs.getBoolean("NativeBottomNav", false)) }
     val resources = LocalResources.current
     var appLanguage by remember { mutableStateOf(AppLocale.current(context)) }
     var showLanguageDialog by remember { mutableStateOf(false) }
@@ -542,6 +543,19 @@ fun SettingsContent(
                         subtitle = playerModeLabel,
                         icon = TablerIcons.PlayerPlay,
                         onClick = { showPlayerModeDialog = true }
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(start = 44.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+
+                    SettingSwitchTile(
+                        title = stringResource(R.string.settings_native_bottom_nav),
+                        subtitle = stringResource(R.string.settings_native_bottom_nav_subtitle),
+                        icon = TablerIcons.DeviceMobile,
+                        checked = nativeBottomNav,
+                        onCheckedChange = {
+                            nativeBottomNav = it
+                            prefs.edit().putBoolean("NativeBottomNav", it).apply()
+                        }
                     )
 
                     HorizontalDivider(modifier = Modifier.padding(start = 44.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))

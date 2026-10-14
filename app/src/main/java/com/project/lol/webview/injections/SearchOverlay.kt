@@ -656,6 +656,8 @@ object SearchOverlay {
                     }, true);
                 }
 
+                // Native bottom tab can open the existing search overlay instantly.
+                window.splSearchOpen = function(){ buildPanel(); showPanel(); };
                 css();
                 if(window.visualViewport){
                     window.visualViewport.addEventListener('resize', onViewportResize);
