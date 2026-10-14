@@ -148,7 +148,7 @@ class SpotifyBridge(activityRef: WeakReference<Activity>) {
     @JavascriptInterface
     fun recMediaPosition(position: Long) {
         Logger.v(CALL, "position=$position")
-        onMediaPosition?.invoke(position)
+        activityRef.get()?.runOnUiThread { onMediaPosition?.invoke(position) }
         MediaNotificationService.instance?.updatePlaybackPosition(position)
     }
 
