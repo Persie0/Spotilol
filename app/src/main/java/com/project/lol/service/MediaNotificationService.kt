@@ -491,6 +491,12 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_RESTORE_PLAYBACK && !ensureForeground()) {
+            // A startForegroundService request must be promoted promptly, or Android
+            // terminates the process after its foreground startup deadline.
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         intent?.getStringExtra(EXTRA_MEDIA_STATUS)?.let { updateFromMediaStatus(it) }
         if (isPlaying) ensureForeground()
         try {
@@ -999,7 +1005,7 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
                     mainHandler.post {
                         // Covers can finish downloading after the user has skipped tracks.
                         if (lastCoverUrl != url) {
-                            if (scaled != raw) scaled.recycle()
+                            scaled.recycle()
                             return@post
                         }
                         coverBitmap = scaled
@@ -1012,16 +1018,18 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
         }.start()
     }
 
-    private fun ensureForeground() {
-        if (isForeground) return
-        try {
+    private fun ensureForeground(): Boolean {
+        if (isForeground) return true
+        return try {
             ServiceCompat.startForeground(
                 this, NOTIFICATION_ID, buildNotificationSafe(), getStartForegroundServiceType()
             )
             isForeground = true
             Logger.i(TAG, "media playback promoted to foreground")
+            true
         } catch (e: RuntimeException) {
             Logger.e(TAG, "Failed to enter foreground media playback", e)
+            false
         }
     }
 
