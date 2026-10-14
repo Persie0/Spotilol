@@ -78,6 +78,37 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
         const val ACTION_REPEAT = "com.project.lol.ACTION_REPEAT"
         const val ACTION_FAVORITE = "com.project.lol.ACTION_FAVORITE"
         const val ACTION_WIDGET_REFRESH = "com.project.lol.ACTION_WIDGET_REFRESH"
+        private const val ACTION_RESTORE_PLAYBACK = "com.project.lol.ACTION_RESTORE_PLAYBACK"
+        private const val EXTRA_MEDIA_STATUS = "com.project.lol.EXTRA_MEDIA_STATUS"
+        private const val PAUSED_FOREGROUND_GRACE_MS = 10 * 60 * 1000L
+
+        /**
+         * JavascriptInterface calls run on WebView's bridge thread, not the Android main thread.
+         * Keep session, notification and service lifecycle updates on the main looper.
+         */
+        fun onWebMediaStatus(context: Context, json: String) {
+            mainHandler.post {
+                instance?.let {
+                    it.updateFromMediaStatus(json)
+                    return@post
+                }
+                // A service that was reclaimed while the UI was alive may need restarting.
+                val playing = runCatching {
+                    org.json.JSONObject(json).optBoolean("playing", false)
+                }.getOrDefault(false)
+                if (!playing) return@post
+                val app = context.applicationContext
+                val startIntent = Intent(app, MediaNotificationService::class.java)
+                    .setAction(ACTION_RESTORE_PLAYBACK)
+                    .putExtra(EXTRA_MEDIA_STATUS, json)
+                try {
+                    ContextCompat.startForegroundService(app, startIntent)
+                } catch (e: RuntimeException) {
+                    // Android 12+ may reject an FGS launch when the app has no exemption.
+                    Logger.e(TAG, "Cannot restore background media service", e)
+                }
+            }
+        }
 
         private const val CUSTOM_ACTION_TOGGLE_FAV = "toggle_fav"
         private const val CUSTOM_ACTION_TOGGLE_SHUFFLE = "toggle_shuffle"
@@ -228,6 +259,16 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
     private var wakeLock: PowerManager.WakeLock? = null
     private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var lastWidgetPushAt = 0L
+    private var isForeground = false
+    private val demotePausedPlayback = Runnable {
+        if (!isPlaying && isForeground) {
+            // The session and paused notification remain usable, without claiming
+            // an active media-playback foreground service indefinitely.
+            stopForeground(STOP_FOREGROUND_DETACH)
+            isForeground = false
+            Logger.i(TAG, "paused for 10 minutes; left foreground playback mode")
+        }
+    }
 
     private val actionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -406,12 +447,8 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
             Logger.e(TAG, "Failed to create notification channel", e)
         }
 
-        try {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotificationSafe(), getStartForegroundServiceType())
-        } catch (e: Throwable) {
-            Logger.e(TAG, "Failed to start foreground", e)
-        }
-
+        // A MediaStyle notification needs an initialized media session token.
+        // Only enter foreground mode once actual playback is confirmed.
         try {
             setupMediaSession()
         } catch (e: Exception) {
@@ -441,7 +478,7 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
 
     @Suppress("DEPRECATION")
     private fun getStartForegroundServiceType(): Int {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
         } else {
             0
@@ -454,13 +491,24 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
             stopSelf()
             return START_NOT_STICKY
         }
-        try {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotificationSafe(), getStartForegroundServiceType())
-        } catch (e: Throwable) {
-            Logger.e(TAG, "Failed to re-assert foreground", e)
+        val requiresPromptForeground = intent?.action == ACTION_RESTORE_PLAYBACK ||
+            intent?.action == Intent.ACTION_MEDIA_BUTTON
+        if (requiresPromptForeground && !ensureForeground()) {
+            // Both restoration and MediaButtonReceiver may start us with
+            // startForegroundService; Android requires a quick promotion.
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
+        if (requiresPromptForeground && !isPlaying) {
+            // A cold media-button event might not actually start audio.
+            // Release foreground priority if no playback status arrives.
+            mainHandler.removeCallbacks(demotePausedPlayback)
+            mainHandler.postDelayed(demotePausedPlayback, 60_000L)
+        }
+        intent?.getStringExtra(EXTRA_MEDIA_STATUS)?.let { updateFromMediaStatus(it) }
+        if (isPlaying) ensureForeground()
         try {
-            MediaButtonReceiver.handleIntent(mediaSession, intent)
+            if (::mediaSession.isInitialized) MediaButtonReceiver.handleIntent(mediaSession, intent)
         } catch (e: Exception) {
             Logger.e(TAG, "Failed to handle media button intent", e)
         }
@@ -570,6 +618,7 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
         try { getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(audioRouteCallback) } catch (_: Exception) {}
         try { getSystemService(AudioManager::class.java).unregisterAudioPlaybackCallback(navPromptCallback) } catch (_: Exception) {}
         mainHandler.removeCallbacks(navUnduckRunnable)
+        mainHandler.removeCallbacks(demotePausedPlayback)
         getSharedPreferences("spotilol_prefs", MODE_PRIVATE)
             .unregisterOnSharedPreferenceChangeListener(prefsListener)
         if (::mediaSession.isInitialized) {
@@ -610,6 +659,20 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
                 MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
             )
             setCallback(MediaSessionCallback())
+            packageManager.getLaunchIntentForPackage(packageName)?.let { launch ->
+                setSessionActivity(
+                    PendingIntent.getActivity(
+                        this@MediaNotificationService, 0, launch,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                )
+            }
+            setPlaybackState(
+                PlaybackStateCompat.Builder()
+                    .setActions(PLAYBACK_ACTIONS)
+                    .setState(PlaybackStateCompat.STATE_NONE, 0L, 0f)
+                    .build()
+            )
             isActive = true
         }
         sessionToken = mediaSession.sessionToken
@@ -754,6 +817,11 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
 
     private fun pausePlayback() {
         isPlaying = false
+        releaseWakeLock()
+        mainHandler.removeCallbacks(demotePausedPlayback)
+        if (isForeground) {
+            mainHandler.postDelayed(demotePausedPlayback, PAUSED_FOREGROUND_GRACE_MS)
+        }
         updatePlaybackState()
         showNotification()
         if (::mediaSession.isInitialized) {
@@ -766,6 +834,9 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
 
     private fun resumePlayback() {
         isPlaying = true
+        mainHandler.removeCallbacks(demotePausedPlayback)
+        acquireWakeLock()
+        ensureForeground()
         updatePlaybackState()
         showNotification()
         if (::mediaSession.isInitialized) {
@@ -777,6 +848,10 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
     }
 
     fun updateFromMediaStatus(json: String) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { updateFromMediaStatus(json) }
+            return
+        }
         try {
             lastMediaStatusJson = json
             val obj = org.json.JSONObject(json)
@@ -807,13 +882,26 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
 
             updatePlaybackState()
             updateMetadata()
-            showNotification()
+            if (isPlaying) {
+                mainHandler.removeCallbacks(demotePausedPlayback)
+                ensureForeground()
+            } else if (isForeground) {
+                mainHandler.removeCallbacks(demotePausedPlayback)
+                mainHandler.postDelayed(demotePausedPlayback, PAUSED_FOREGROUND_GRACE_MS)
+            }
+            // A paused session is retained by Android's system media carousel.
+            if (currentTitle.isNotBlank() || isForeground) showNotification()
             pushWidgetState(force = true)
         } catch (_: Exception) {}
     }
 
     fun updatePlaybackPosition(position: Long) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { updatePlaybackPosition(position) }
+            return
+        }
         currentPosition = position
+        if (isPlaying) acquireWakeLock()
         updatePlaybackState()
         pushWidgetState()
     }
@@ -860,8 +948,11 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
         val state = PlaybackStateCompat.Builder()
             .setActions(PLAYBACK_ACTIONS)
             .setState(
-                if (isPlaying) PlaybackStateCompat.STATE_PLAYING
-                else PlaybackStateCompat.STATE_PAUSED,
+                when {
+                    isPlaying -> PlaybackStateCompat.STATE_PLAYING
+                    currentTitle.isNotBlank() -> PlaybackStateCompat.STATE_PAUSED
+                    else -> PlaybackStateCompat.STATE_NONE
+                },
                 currentPosition, if (isPlaying) 1f else 0f
             )
             .addCustomAction(
@@ -927,18 +1018,40 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
                     val h = (raw.height * scale).toInt()
                     val scaled = Bitmap.createScaledBitmap(raw, w, h, true)
                     if (scaled != raw) raw.recycle()
-                    coverBitmap = scaled
-                    updateMetadata()
-                    showNotification()
-                    pushWidgetState(force = true)
+                    mainHandler.post {
+                        // Covers can finish downloading after the user has skipped tracks.
+                        if (lastCoverUrl != url) {
+                            scaled.recycle()
+                            return@post
+                        }
+                        coverBitmap = scaled
+                        updateMetadata()
+                        if (currentTitle.isNotBlank() || isForeground) showNotification()
+                        pushWidgetState(force = true)
+                    }
                 }
             } catch (_: Exception) {}
         }.start()
     }
 
+    private fun ensureForeground(): Boolean {
+        if (isForeground) return true
+        return try {
+            ServiceCompat.startForeground(
+                this, NOTIFICATION_ID, buildNotificationSafe(), getStartForegroundServiceType()
+            )
+            isForeground = true
+            Logger.i(TAG, "media playback promoted to foreground")
+            true
+        } catch (e: RuntimeException) {
+            Logger.e(TAG, "Failed to enter foreground media playback", e)
+            false
+        }
+    }
+
     private fun showNotification() {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIFICATION_ID, buildNotification())
+        nm.notify(NOTIFICATION_ID, buildNotificationSafe())
     }
 
     private fun buildNotificationSafe(): Notification {
@@ -954,12 +1067,13 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
         }
     }
 
-    private fun buildMediaStyle(showShuffle: Boolean): MediaStyle {
-        val compact = if (showShuffle) intArrayOf(0, 1, 2, 3) else intArrayOf(0, 1, 2)
+    private fun buildMediaStyle(): MediaStyle {
+        // Android's media notification supports at most three compact actions.
+        // Shuffle and favorite remain available in the expanded controls.
+        // Dismissing a paused notification must never start playback.
         val style = MediaStyle()
-            .setShowActionsInCompactView(*compact)
-            .setShowCancelButton(true)
-            .setCancelButtonIntent(getActionPendingIntent(ACTION_PLAY_PAUSE))
+            .setShowActionsInCompactView(0, 1, 2)
+            .setShowCancelButton(false)
         if (::mediaSession.isInitialized) {
             style.setMediaSession(mediaSession.sessionToken)
         }
@@ -1022,12 +1136,14 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
             .setSubText(getString(R.string.app_name))
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(contentIntent)
-            .setOngoing(true)
+            .setOngoing(isPlaying)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setColor(accent())
-            .setStyle(buildMediaStyle(isShuffleAvailable))
+            .setStyle(buildMediaStyle())
         actions.forEach { builder.addAction(it) }
 
         coverBitmap?.let { builder.setLargeIcon(it) }
@@ -1053,7 +1169,7 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
     }
 
     private fun acquireWakeLock() {
-        if (wakeLock == null) {
+        if (wakeLock?.isHeld != true) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
@@ -1071,9 +1187,10 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val stopOnSwipe = getSharedPreferences("spotilol_prefs", MODE_PRIVATE)
-            .getBoolean("SwipeStop", true)
+            .getBoolean("SwipeStop", false)
         if (stopOnSwipe) {
             taskRemoved = true
+            wakeAndRun("actPlayPause(false);")
             if (::mediaSession.isInitialized) {
                 try { mediaSession.isActive = false } catch (_: Exception) {}
             }
