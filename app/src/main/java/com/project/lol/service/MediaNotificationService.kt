@@ -478,7 +478,7 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
 
     @Suppress("DEPRECATION")
     private fun getStartForegroundServiceType(): Int {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
         } else {
             0
@@ -996,10 +996,17 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
                     val h = (raw.height * scale).toInt()
                     val scaled = Bitmap.createScaledBitmap(raw, w, h, true)
                     if (scaled != raw) raw.recycle()
-                    coverBitmap = scaled
-                    updateMetadata()
-                    showNotification()
-                    pushWidgetState(force = true)
+                    mainHandler.post {
+                        // Covers can finish downloading after the user has skipped tracks.
+                        if (lastCoverUrl != url) {
+                            if (scaled != raw) scaled.recycle()
+                            return@post
+                        }
+                        coverBitmap = scaled
+                        updateMetadata()
+                        if (currentTitle.isNotBlank() || isForeground) showNotification()
+                        pushWidgetState(force = true)
+                    }
                 }
             } catch (_: Exception) {}
         }.start()
