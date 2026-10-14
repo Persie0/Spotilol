@@ -12,7 +12,6 @@ object PowerSave {
 
             var videoObs = null;
             var psStyle = null;
-            var origSI = null;
 
             function isCanvasVideo(v){
                 try{
