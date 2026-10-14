@@ -22,6 +22,7 @@ object WebViewHost {
         fun onWebViewError(code: Int, description: String)
         fun onRenderProcessGone()
         fun onPlayerReady(view: WebView)
+        fun onNavigationChanged(url: String?)
     }
 
     private const val TAG = "webviewHost"
@@ -92,6 +93,7 @@ object WebViewHost {
         )
         val client = SpotifyWebViewClient(
             onPlayerReady = { ready -> uiHost?.onPlayerReady(ready) },
+            onRouteChanged = { url -> uiHost?.onNavigationChanged(url) },
             onLoginRequired = { view.loadUrl(LOGIN_URL) },
             onRenderProcessGone = { onRendererGone() },
             onWebViewError = { code, description -> uiHost?.onWebViewError(code, description) }
