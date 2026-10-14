@@ -80,7 +80,7 @@ class SpotifyWebViewClient(
         }
 
         // Avoid a fixed delay on fast devices; retain a fallback for slow pages.
-        view.evaluateJavascript("!!document.querySelector('aside[data-testid=\\\"now-playing-bar\\\"]')") { ready ->
+        view.evaluateJavascript("!!document.querySelector('aside[data-testid=now-playing-bar]')") { ready ->
             if (ready == "true") {
                 injectPlayerControl(view)
             } else {
