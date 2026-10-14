@@ -408,4 +408,6 @@
     <string name="settings_theme_dynamic">Dynamic (system colors)</string>
     <string name="settings_low_end_mode">Low-end performance mode</string>
     <string name="settings_low_end_mode_subtitle">Reduce player DOM updates and hide optional video/Canvas effects. Audio quality is unchanged. Restart playback if visual effects remain active.</string>
+    <string name="settings_native_bottom_nav">Spotify-style bottom tabs (experimental)</string>
+    <string name="settings_native_bottom_nav_subtitle">Show native Home, Search and Library tabs. The original WebView still provides playback and content. Turn off if a Spotify layout update causes problems.</string>
 </resources>
