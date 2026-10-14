@@ -101,16 +101,9 @@ object PowerSave {
                     appendStyle();
                     document.addEventListener('DOMContentLoaded', appendStyle);
 
-                    origSI = window.setInterval.bind(window);
-                    window.setInterval = function(fn, delay){
-                        if(window.__splPsActive){
-                            var d = Number(delay) || 0;
-                            if(d >= 100 && d < 5000){ delay = Math.max(d*3, 1500); }
-                            else if(d >= 5000 && d < 10000){ delay = 10000; }
-                        }
-                        return origSI(fn, delay);
-                    };
-
+                    // Do not monkey-patch window.setInterval: that changes Spotify's
+                    // own playback, navigation and auth timers, not just our UI.
+                    // Slow only the custom player's DOM reconciliation.
                     window.__splPsRafMs = 500;
                 } else {
                     if(!window.__splPsActive) return;
@@ -119,13 +112,12 @@ object PowerSave {
                     videoObs = null;
                     try{ if(psStyle) psStyle.remove(); }catch(e){}
                     psStyle = null;
-                    if(origSI){ try{ window.setInterval = origSI; }catch(e){} }
                     unfreezeAll();
                     window.__splPsRafMs = 0;
                 }
             };
 
-            window.__splApplyPowerSave(!!window.__splPowerSavePref);
+            window.__splApplyPowerSave(!!(window.__splPowerSavePref || window.__splLowEnd));
         })();
     """
 }
