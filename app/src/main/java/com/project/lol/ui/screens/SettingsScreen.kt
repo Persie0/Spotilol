@@ -229,7 +229,7 @@ fun SettingsContent(
     var lyricsStyle by remember { mutableStateOf(prefs.getString("LyricsStyle", LyricsTheme.DEFAULT_STYLE) ?: LyricsTheme.DEFAULT_STYLE) }
     var spicyLyricsEnabled by remember { mutableStateOf(prefs.getBoolean("SpicyLyrics", true)) }
     var telemetryEnabled by remember { mutableStateOf(prefs.getBoolean(Telemetry.KEY, false)) }
-    var fastStartup by remember { mutableStateOf(prefs.getBoolean("FastStartup", false)) }
+    var fastStartup by remember { mutableStateOf(prefs.getBoolean("FastStartup", true)) }
 
     val context = LocalContext.current
     val resources = LocalResources.current
