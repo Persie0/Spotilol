@@ -154,10 +154,17 @@ class SpotifyBridge(activityRef: WeakReference<Activity>) {
 
     @JavascriptInterface
     fun recMediaStatus(json: String?) {
-        json?.let {
-            Logger.d(CALL, "media status (${it.length} chars): ${it.take(180)}")
-            onMediaStatus?.invoke(it)
-            MediaNotificationService.instance?.updateFromMediaStatus(it)
+        json?.let { status ->
+            Logger.d(CALL, "media status (${status.length} chars): ${status.take(180)}")
+            // WebView invokes @JavascriptInterface methods on its own bridge thread.
+            activityRef.get()?.runOnUiThread { onMediaStatus?.invoke(status) }
+            val context = activityRef.get()?.applicationContext
+                ?: com.project.lol.webview.WebViewHost.webView?.context?.applicationContext
+            if (context != null) {
+                MediaNotificationService.onWebMediaStatus(context, status)
+            } else {
+                MediaNotificationService.instance?.updateFromMediaStatus(status)
+            }
         }
     }
 
