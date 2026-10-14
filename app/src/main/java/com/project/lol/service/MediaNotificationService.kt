@@ -491,11 +491,19 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (intent?.action == ACTION_RESTORE_PLAYBACK && !ensureForeground()) {
-            // A startForegroundService request must be promoted promptly, or Android
-            // terminates the process after its foreground startup deadline.
+        val requiresPromptForeground = intent?.action == ACTION_RESTORE_PLAYBACK ||
+            intent?.action == Intent.ACTION_MEDIA_BUTTON
+        if (requiresPromptForeground && !ensureForeground()) {
+            // Both restoration and MediaButtonReceiver may start us with
+            // startForegroundService; Android requires a quick promotion.
             stopSelf(startId)
             return START_NOT_STICKY
+        }
+        if (requiresPromptForeground && !isPlaying) {
+            // A cold media-button event might not actually start audio.
+            // Release foreground priority if no playback status arrives.
+            mainHandler.removeCallbacks(demotePausedPlayback)
+            mainHandler.postDelayed(demotePausedPlayback, 60_000L)
         }
         intent?.getStringExtra(EXTRA_MEDIA_STATUS)?.let { updateFromMediaStatus(it) }
         if (isPlaying) ensureForeground()
