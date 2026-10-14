@@ -1059,12 +1059,12 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
         }
     }
 
-    private fun buildMediaStyle(showShuffle: Boolean): MediaStyle {
-        val compact = if (showShuffle) intArrayOf(0, 1, 2, 3) else intArrayOf(0, 1, 2)
-        // The old cancel button toggled play/pause: dismissing a paused player
-        // could unexpectedly START audio. Android supplies normal media dismissal.
+    private fun buildMediaStyle(): MediaStyle {
+        // Android's media notification supports at most three compact actions.
+        // Shuffle and favorite remain available in the expanded controls.
+        // Dismissing a paused notification must never start playback.
         val style = MediaStyle()
-            .setShowActionsInCompactView(*compact)
+            .setShowActionsInCompactView(0, 1, 2)
             .setShowCancelButton(false)
         if (::mediaSession.isInitialized) {
             style.setMediaSession(mediaSession.sessionToken)
@@ -1135,7 +1135,7 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setColor(accent())
-            .setStyle(buildMediaStyle(isShuffleAvailable))
+            .setStyle(buildMediaStyle())
         actions.forEach { builder.addAction(it) }
 
         coverBitmap?.let { builder.setLargeIcon(it) }
