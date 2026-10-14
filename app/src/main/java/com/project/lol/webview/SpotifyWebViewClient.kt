@@ -133,6 +133,7 @@ class SpotifyWebViewClient(
      */
     fun installDocumentStartScripts(view: WebView): Boolean {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return false
+        currentWebView = view
         val prefs = view.context.getSharedPreferences("spotilol_prefs", 0)
         val js = buildEarlyJs(prefs, isGoogle = false)
         docStartJustRegistered = false
@@ -148,6 +149,7 @@ class SpotifyWebViewClient(
 
     private fun buildEarlyJs(prefs: android.content.SharedPreferences, isGoogle: Boolean): String {
         val powerSave = prefs.getBoolean("PowerSave", false)
+        val lowEnd = isLowEndMode(prefs, docStartView?.context ?: currentWebView?.context)
         val blockSW = prefs.getBoolean("BlockServiceWorker", true)
         val hideEmptyPlayer = prefs.getBoolean("HideEmptyPlayer", false)
         val playlistSort = prefs.getBoolean("PlaylistSortEnabled", true)
@@ -157,6 +159,7 @@ class SpotifyWebViewClient(
         val parts = buildList {
             add("window.__splShowScrollbar=$showScrollbar;")
             add("window.__splPowerSavePref=$powerSave;")
+            add("window.__splLowEnd=$lowEnd;")
             add("window.__splHideEmpty=$hideEmptyPlayer;")
             add("window.__splPlaylistSortEnabled=$playlistSort;")
             add(if (isGoogle) GoogleSpoof.CONTENT else BrowserSpoof.CONTENT)
@@ -170,6 +173,11 @@ class SpotifyWebViewClient(
             add(NavDuck.CONTENT)
         }
         return parts.joinToString("\n") { "try{\n$it\n}catch(e){}" }
+    }
+
+    private fun isLowEndMode(prefs: android.content.SharedPreferences, context: android.content.Context?): Boolean {
+        val manager = context?.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        return prefs.getBoolean("LowEndMode", manager?.isLowRamDevice == true)
     }
 
     private fun isWebPlayerUrl(url: String?): Boolean =
@@ -352,6 +360,7 @@ class SpotifyWebViewClient(
         val lyricsStyle = prefs.getString("LyricsStyle", LyricsTheme.DEFAULT_STYLE) ?: LyricsTheme.DEFAULT_STYLE
         val webCanvas = prefs.getBoolean("WebCanvas", true)
         val webVideos = prefs.getBoolean("WebVideos", true)
+        val lowEndMode = isLowEndMode(prefs, view.context)
 
         Logger.s(
             TAG,
@@ -369,6 +378,7 @@ class SpotifyWebViewClient(
             append("window.__spicyLyricsEnabled=$spicyLyricsEnabled;\n")
             append("window.__splShowScrollbar=$showScrollbar;\n")
             append("window.__splWebPrefs=[$webCanvas,$webVideos];\n")
+            append("window.__splLowEnd=$lowEndMode;\n")
             if (debugOverlay) {
                 append(DevLogPrelude.js())
                 append("\n")
@@ -454,8 +464,16 @@ class SpotifyWebViewClient(
                 "PlayerMode" ->
                     switchPlayerMode(wv, prefs.getString("PlayerMode", "spotilol") ?: "spotilol")
                 "PowerSave" -> {
-                    val on = prefs.getBoolean("PowerSave", false)
+                    val on = prefs.getBoolean("PowerSave", false) || isLowEndMode(prefs, wv.context)
                     wv.evaluateJavascript("if(window.__splApplyPowerSave) window.__splApplyPowerSave($on);", null)
+                }
+                "LowEndMode" -> {
+                    val on = isLowEndMode(prefs, wv.context)
+                    val powerSave = prefs.getBoolean("PowerSave", false) || on
+                    wv.evaluateJavascript(
+                        "window.__splLowEnd=$on; if(window.__splApplyPowerSave) window.__splApplyPowerSave($powerSave);",
+                        null
+                    )
                 }
                 "CloseNowPlay" -> {
                     val closeNp = prefs.getBoolean("CloseNowPlay", false)
