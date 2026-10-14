@@ -4,7 +4,10 @@ object MainLoop {
     const val CONTENT = """
             window.firstFuck = function(){
                 if(pfint) clearInterval(pfint);
-                pfint = setInterval(function(){
+                if(window.__splMainObserver) window.__splMainObserver.disconnect();
+                if(window.__splBootInterval) clearInterval(window.__splBootInterval);
+
+                var scanControls = function(){
                     if(playing && document.visibilityState=='hidden' && !!document.querySelector('.VideoPlayer__container video')) {
                         AndBridge.wakeUp();
                     } else if(!AndBridge.isWoke() && document.visibilityState=='visible' && !document.querySelector('.VideoPlayer__container video')) {
@@ -33,15 +36,43 @@ object MainLoop {
 
                     var pb = document.querySelector('aside button[data-testid=control-button-playpause]:not(.fuckd)');
                     if(pb) wirePlayBtn(pb);
-                },5000);
+                };
+                // React can replace the controls during SPA navigation. Observe
+                // only the player container and react to relevant element mounts.
+                var observerRoot = null, scanQueued = false;
+                function attachControlsObserver(){
+                    var root = document.querySelector('aside[data-testid="now-playing-bar"]');
+                    if(!root || root === observerRoot) return;
+                    observerRoot = root;
+                    if(window.__splMainObserver) window.__splMainObserver.disconnect();
+                    window.__splMainObserver = new MutationObserver(function(mutations){
+                        if(window.__splBg || window.__splBusy || scanQueued) return;
+                        var buttonsChanged = mutations.some(function(m){
+                            for(var i=0;i<m.addedNodes.length;i++){
+                                var n=m.addedNodes[i];
+                                if(n.nodeType===1 && (n.matches('button') || (n.querySelector && n.querySelector('button')))) return true;
+                            }
+                            return false;
+                        });
+                        if(!buttonsChanged) return;
+                        scanQueued = true;
+                        setTimeout(function(){scanQueued=false;scanControls();},90);
+                    });
+                    window.__splMainObserver.observe(root,{childList:true,subtree:true});
+                }
+                scanControls();
+                attachControlsObserver();
+                // Low-frequency fallback for full player DOM remounts.
+                pfint = setInterval(function(){scanControls();attachControlsObserver();},12000);
 
                 var tries = 0;
                 var bootIv = setInterval(function(){
                     tries++;
                     var pb = document.querySelector('aside button[data-testid=control-button-playpause]:not(.fuckd)');
-                    if(pb){ clearInterval(bootIv); wirePlayBtn(pb); }
+                    if(pb){ clearInterval(bootIv); wirePlayBtn(pb); attachControlsObserver(); }
                     else if(tries > 100){ clearInterval(bootIv); }
                 },300);
+                window.__splBootInterval = bootIv;
             };
 
             window.wirePlayBtn = function(pb){
