@@ -809,6 +809,11 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
 
     private fun pausePlayback() {
         isPlaying = false
+        releaseWakeLock()
+        mainHandler.removeCallbacks(demotePausedPlayback)
+        if (isForeground) {
+            mainHandler.postDelayed(demotePausedPlayback, PAUSED_FOREGROUND_GRACE_MS)
+        }
         updatePlaybackState()
         showNotification()
         if (::mediaSession.isInitialized) {
@@ -821,6 +826,9 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
 
     private fun resumePlayback() {
         isPlaying = true
+        mainHandler.removeCallbacks(demotePausedPlayback)
+        acquireWakeLock()
+        ensureForeground()
         updatePlaybackState()
         showNotification()
         if (::mediaSession.isInitialized) {
@@ -1053,10 +1061,11 @@ class MediaNotificationService : MediaBrowserServiceCompat() {
 
     private fun buildMediaStyle(showShuffle: Boolean): MediaStyle {
         val compact = if (showShuffle) intArrayOf(0, 1, 2, 3) else intArrayOf(0, 1, 2)
+        // The old cancel button toggled play/pause: dismissing a paused player
+        // could unexpectedly START audio. Android supplies normal media dismissal.
         val style = MediaStyle()
             .setShowActionsInCompactView(*compact)
-            .setShowCancelButton(true)
-            .setCancelButtonIntent(getActionPendingIntent(ACTION_PLAY_PAUSE))
+            .setShowCancelButton(false)
         if (::mediaSession.isInitialized) {
             style.setMediaSession(mediaSession.sessionToken)
         }
