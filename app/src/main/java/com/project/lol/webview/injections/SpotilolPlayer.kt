@@ -661,7 +661,7 @@ object SpotilolPlayer {
 
                         var artistEl=document.querySelector('a[data-testid=context-item-info-artist]');
                         if(!artistEl) artistEl=document.querySelector('a[data-testid=context-item-info-show]');
-                        if(ar&&artistEl&&tk.textContent!=='No track') ar.textContent=artistEl.textContent||'';
+                        if(ar&&artistEl&&(!tk||tk.textContent!=='No track')&&ar.textContent!==artistEl.textContent) ar.textContent=artistEl.textContent||'';
 
                         var rg=document.querySelector('[data-testid="playback-progressbar"] input[type=range]');
                         if(pp||ppm){
@@ -669,8 +669,16 @@ object SpotilolPlayer {
                             var ph=isPlaying
                                 ?'<svg viewBox="0 0 16 16"><path fill="currentColor" d="M2.7 1a.7.7 0 0 0-.7.7v12.6a.7.7 0 0 0 .7.7h2.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7zm8 0a.7.7 0 0 0-.7.7v12.6a.7.7 0 0 0 .7.7h2.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7z"/></svg>'
                                 :'<svg viewBox="0 0 16 16"><path fill="currentColor" d="M3 1.713a.7.7 0 0 1 1.05-.607l10.89 6.288a.7.7 0 0 1 0 1.212L4.05 14.894A.7.7 0 0 1 3 14.288z"/></svg>';
-                            if(pp)pp.innerHTML=ph;
-                            if(ppm)ppm.innerHTML=ph;
+                            // Rebuilding SVGs on every tick allocates DOM nodes and can interrupt taps.
+                            var playKey = isPlaying ? 'playing' : 'paused';
+                            if(pp && pp.getAttribute('data-spl-play-state')!==playKey){
+                                pp.innerHTML=ph;
+                                pp.setAttribute('data-spl-play-state',playKey);
+                            }
+                            if(ppm && ppm.getAttribute('data-spl-play-state')!==playKey){
+                                ppm.innerHTML=ph;
+                                ppm.setAttribute('data-spl-play-state',playKey);
+                            }
                         }
                         if(sh){
                             var sst=splShuffleState();
@@ -738,8 +746,9 @@ object SpotilolPlayer {
                             } else if(!muted&&hasX){
                                 vbb.innerHTML='<svg viewBox="0 0 16 16"><path fill="currentColor" d="M9.741.85a.75.75 0 0 1 .375.65v13a.75.75 0 0 1-1.125.65l-6.925-4a3.64 3.64 0 0 1-1.33-4.967 3.64 3.64 0 0 1 1.33-1.332l6.925-4a.75.75 0 0 1 .75 0zm-6.924 5.3a2.14 2.14 0 0 0 0 3.7l5.8 3.35V2.8zm8.683 4.29V5.56a2.75 2.75 0 0 1 0 4.88"/><path fill="currentColor" d="M11.5 13.614a5.752 5.752 0 0 0 0-11.228v1.55a4.252 4.252 0 0 1 0 8.127z"/></svg>';
                             }
-                            if(vf) vf.style.width=(Math.max(0,Math.min(1,vpct))*100)+'%';
-                            if(vh) vh.style.left=(Math.max(0,Math.min(1,vpct))*100)+'%';
+                            var volumePct=(Math.max(0,Math.min(1,vpct))*100)+'%';
+                            if(vf && vf.style.width!==volumePct) vf.style.width=volumePct;
+                            if(vh && vh.style.left!==volumePct) vh.style.left=volumePct;
                         }
                         var lb=document.querySelector('button[data-testid=lyrics-button]');
                         if(lb){
@@ -793,11 +802,17 @@ object SpotilolPlayer {
                         }
                         var posEl=document.querySelector('[data-testid="playback-position"]');
                         var durEl=document.querySelector('[data-testid="playback-duration"]');
-                        if(ps&&posEl) ps.textContent=posEl.textContent;
-                        if(ds&&durEl) ds.textContent=durEl.textContent;
+                        if(ps&&posEl&&ps.textContent!==posEl.textContent) ps.textContent=posEl.textContent;
+                        if(ds&&durEl&&ds.textContent!==durEl.textContent) ds.textContent=durEl.textContent;
                         splApplyEmpty();
-                        splCanvasTick();
-                        splVideoTick();
+                        // Canvas discovery and moving video nodes need not run for
+                        // each progress update; they are comparatively expensive.
+                        var visualNow=Date.now();
+                        if(!splLastVisualTick||visualNow-splLastVisualTick>=(window.__splLowEnd?1400:650)){
+                            splLastVisualTick=visualNow;
+                            splCanvasTick();
+                            splVideoTick();
+                        }
                     };
                     function splTint(src){
                         var im=new Image();
@@ -961,8 +976,14 @@ object SpotilolPlayer {
                     }
 
                     var rafLastTime=0;
+                    var splLastVisualTick=0;
                     function rafUpdate(timestamp){
-                        if(!window.__splBusy&&!window.__splBg&&timestamp-rafLastTime>100){ splUpdate(); rafLastTime=timestamp; }
+                        // CSS animates the progress fill between samples. A full DOM
+                        // reconciliation ten times per second is unnecessary on mobile.
+                        var interval=window.__splLowEnd?400:200;
+                        if(!window.__splBusy&&!window.__splBg&&timestamp-rafLastTime>=interval){
+                            splUpdate(); rafLastTime=timestamp;
+                        }
                         requestAnimationFrame(rafUpdate);
                     }
                     var splWasOpen=false;
@@ -972,11 +993,13 @@ object SpotilolPlayer {
             };
             if(document.readyState==='complete') initSpotilolPlayer();
             else window.addEventListener('load',initSpotilolPlayer);
+            // Recreate a missing custom player on a slow Spotify SPA route change.
+            // This is a watchdog, not the main UI update loop.
             setInterval(function(){
                 if(window.__splBg||window.__splBusy) return;
                 var npb=document.querySelector('aside[data-testid="now-playing-bar"]');
                 if(npb&&npb.style.display!=='none') initSpotilolPlayer();
-            },3000);
+            },10000);
         
     """
 }
