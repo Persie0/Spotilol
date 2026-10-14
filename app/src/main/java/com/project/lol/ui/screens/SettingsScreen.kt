@@ -214,7 +214,7 @@ fun SettingsContent(
     // var guiMode by remember { mutableStateOf(prefs.getString("GuiMode", "csshack") ?: "csshack") }
     var customCss by remember { mutableStateOf(prefs.getString("CustomCss", "") ?: "") }
     var amoledTheme by remember { mutableStateOf(amoledThemeState) }
-    var swipeStop by remember { mutableStateOf(prefs.getBoolean("SwipeStop", true)) }
+    var swipeStop by remember { mutableStateOf(prefs.getBoolean("SwipeStop", false)) }
     var btAutoPause by remember { mutableStateOf(prefs.getBoolean("BtAutoPause", false)) }
     var btAutoResume by remember { mutableStateOf(prefs.getBoolean("BtAutoResume", false)) }
     var hpAutoResume by remember { mutableStateOf(prefs.getBoolean("HpAutoResume", false)) }
@@ -229,9 +229,14 @@ fun SettingsContent(
     var lyricsStyle by remember { mutableStateOf(prefs.getString("LyricsStyle", LyricsTheme.DEFAULT_STYLE) ?: LyricsTheme.DEFAULT_STYLE) }
     var spicyLyricsEnabled by remember { mutableStateOf(prefs.getBoolean("SpicyLyrics", true)) }
     var telemetryEnabled by remember { mutableStateOf(prefs.getBoolean(Telemetry.KEY, false)) }
-    var fastStartup by remember { mutableStateOf(prefs.getBoolean("FastStartup", false)) }
+    var fastStartup by remember { mutableStateOf(prefs.getBoolean("FastStartup", true)) }
 
     val context = LocalContext.current
+    val lowRamDevice = remember(context) {
+        (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)
+            ?.isLowRamDevice == true
+    }
+    var lowEndMode by remember { mutableStateOf(prefs.getBoolean("LowEndMode", lowRamDevice)) }
     val resources = LocalResources.current
     var appLanguage by remember { mutableStateOf(AppLocale.current(context)) }
     var showLanguageDialog by remember { mutableStateOf(false) }
@@ -537,6 +542,19 @@ fun SettingsContent(
                         subtitle = playerModeLabel,
                         icon = TablerIcons.PlayerPlay,
                         onClick = { showPlayerModeDialog = true }
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(start = 44.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+
+                    SettingSwitchTile(
+                        title = stringResource(R.string.settings_low_end_mode),
+                        subtitle = stringResource(R.string.settings_low_end_mode_subtitle),
+                        icon = TablerIcons.Movie,
+                        checked = lowEndMode,
+                        onCheckedChange = {
+                            lowEndMode = it
+                            prefs.edit().putBoolean("LowEndMode", it).apply()
+                        }
                     )
 
                     HorizontalDivider(modifier = Modifier.padding(start = 44.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
