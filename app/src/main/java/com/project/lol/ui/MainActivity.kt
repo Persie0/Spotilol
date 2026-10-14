@@ -1259,12 +1259,15 @@ class MainActivity : ComponentActivity(), WebViewHost.UiHost {
             return
         }
         if (serviceStarted) return
-        serviceStarted = true
-        val intent = Intent(this, MediaNotificationService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+        // Initialize the MediaBrowserService and session while the Activity is visible.
+        // The service itself promotes to mediaPlayback FGS only when audio starts,
+        // avoiding an idle foreground notification and its 5-second startup deadline.
+        try {
+            startService(Intent(this, MediaNotificationService::class.java))
+            serviceStarted = true
+        } catch (e: IllegalStateException) {
+            serviceStarted = false
+            Logger.e(TAG, "Could not initialize background media session", e)
         }
     }
 
