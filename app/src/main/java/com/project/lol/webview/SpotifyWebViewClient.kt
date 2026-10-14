@@ -79,11 +79,16 @@ class SpotifyWebViewClient(
             return
         }
 
-        Logger.s(TAG, "logged in, injecting player control in 500ms")
-
-        Handler(Looper.getMainLooper()).postDelayed({
-            injectPlayerControl(view)
-        }, 500)
+        // Avoid a fixed delay on fast devices; retain a fallback for slow pages.
+        view.evaluateJavascript("!!document.querySelector('aside[data-testid=\\\"now-playing-bar\\\"]')") { ready ->
+            if (ready == "true") {
+                injectPlayerControl(view)
+            } else {
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (view.parent != null) injectPlayerControl(view)
+                }, 500)
+            }
+        }
 
         view.evaluateJavascript(LogoutCheck.CONTENT) { result ->
             Logger.d(TAG, "logout check: $result")
