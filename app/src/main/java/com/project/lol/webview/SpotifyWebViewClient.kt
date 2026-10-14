@@ -29,6 +29,7 @@ class SpotifyWebViewClient(
     private val onLoginRequired: () -> Unit,
     private val onPlayerReady: ((WebView) -> Unit)? = null,
     private val onNavStateChanged: ((Boolean) -> Unit)? = null,
+    private val onRouteChanged: ((String?) -> Unit)? = null,
     private val onRenderProcessGone: (() -> Unit)? = null,
     private val onWebViewError: ((errorCode: Int, description: String) -> Unit)? = null
 ) : WebViewClient() {
@@ -47,6 +48,7 @@ class SpotifyWebViewClient(
         val canGoBack = view?.canGoBack() == true
         Logger.d(TAG, "history: $url reload=$isReload canGoBack=$canGoBack")
         onNavStateChanged?.invoke(canGoBack)
+        onRouteChanged?.invoke(url)
     }
 
     override fun onPageFinished(view: WebView?, url: String?) {
